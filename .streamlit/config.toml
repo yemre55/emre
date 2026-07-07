@@ -1,0 +1,10 @@
+[theme]
+# Tarayıcı/OS karanlık modda olsa bile uygulamayı hep açık (light) temada
+# sabitliyoruz. Aksi halde dashboard.py'deki özel CSS (kartların beyaz
+# arka planı) ile Streamlit'in karanlık moddaki varsayılan (açık renkli)
+# yazı rengi çakışıyor ve metinler soluk/okunmaz görünüyor.
+base = "light"
+primaryColor = "#00c2cb"
+backgroundColor = "#f4f7f6"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0f172a"
