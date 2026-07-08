@@ -3,12 +3,13 @@ import pandas as pd
 import plotly.express as px
 import time
 import warnings
-warnings.filterwarnings("ignore")
 import io
 import logging
 from database import DashboardVeriErisim
 from services import kritik_stok_eposta_tetikle
 from config import KRITIK_STOK_ESIGI, OTOMATIK_SIPARIS_MIKTARI, TAHMIN_GUN_ESIGI
+
+warnings.filterwarnings("ignore")
 
 # Loglama ayarları
 logging.basicConfig(
