@@ -1,0 +1,15 @@
+target-version = "py311"
+line-length = 120
+ 
+[lint]
+# Varsayılan: E4, E7, E9, F (pyflakes) kuralları aktif.
+#
+# E701/E702 ("tek satırda birden fazla ifade") bilinçli olarak İGNORE
+# ediliyor: proje genelinde "if db: db.close()" gibi tek satırlık
+# temizlik/kapanış deyimleri sıkça kullanılıyor. Bu davranışsal bir hata
+# değil, sadece stil tercihi — kodun genelini şimdi yeniden yazmak yerine
+# kuralı burada bilinçli olarak devre dışı bırakıyoruz.
+#
+# Satır uzunluğu (E501) da henüz standardize edilmediği için dahil değil;
+# ileride kod stilini sıkılaştırmak isterseniz select listesine ekleyebilirsiniz.
+ignore = ["E701", "E702"]
