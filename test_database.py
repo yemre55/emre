@@ -1,9 +1,12 @@
 """
-Faz 4 — Kritik fonksiyonlar için birim testler
-================================================
+Faz 4 + Faz 6 — Kritik fonksiyonlar için birim testler
+========================================================
 Test edilen fonksiyonlar:
   - DashboardVeriErisim.stok_analizi_getir
   - DashboardVeriErisim.otomatik_siparis_taslagi_olustur
+  - DashboardVeriErisim.kullanici_dogrula
+  - DashboardVeriErisim.siparis_onayla
+  - DashboardVeriErisim.urun_islemleri
 
 Bu testler GERÇEK bir MySQL bağlantısına ihtiyaç duymaz. Veritabanı
 katmanı (baglanti_getir / pd.read_sql) mock'lanarak fonksiyonların
@@ -17,7 +20,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import pandas as pd
 
-from database import DashboardVeriErisim
+from database import DashboardVeriErisim, Error
 
 
 @pytest.fixture
@@ -130,3 +133,173 @@ class TestStokAnaliziGetir:
             sonuc = veri.stok_analizi_getir()
 
         assert sonuc is None
+
+
+# ----------------------------------------------------------------------
+# kullanici_dogrula testleri
+# ----------------------------------------------------------------------
+
+class TestKullaniciDogrula:
+
+    def test_dogru_kullanici_adi_ve_sifre_ile_basarili_dogrulama(self, veri):
+        """Kullanıcı adı bulunuyor VE bcrypt şifreyi doğruluyorsa
+        (True, Rol) dönmeli."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "Role": "Yonetici",
+            "PasswordHash": "sahte_hash_degeri",
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        with patch("database.bcrypt.checkpw", return_value=True):
+            sonuc = veri.kullanici_dogrula("yonetici", "dogru_sifre")
+
+        assert sonuc == (True, "Yonetici")
+
+    def test_yanlis_sifre_ile_basarisiz_dogrulama(self, veri):
+        """Kullanıcı adı bulunuyor ama bcrypt şifreyi reddediyorsa
+        (False, None) dönmeli."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "Role": "Yonetici",
+            "PasswordHash": "sahte_hash_degeri",
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        with patch("database.bcrypt.checkpw", return_value=False):
+            sonuc = veri.kullanici_dogrula("yonetici", "yanlis_sifre")
+
+        assert sonuc == (False, None)
+
+    def test_olmayan_kullanici_ile_basarisiz_dogrulama(self, veri):
+        """Kullanıcı adı veritabanında hiç yoksa (fetchone None dönerse)
+        bcrypt hiç çağrılmadan (False, None) dönmeli."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = None
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        sonuc = veri.kullanici_dogrula("olmayan_kullanici", "herhangi_bir_sifre")
+
+        assert sonuc == (False, None)
+
+    def test_db_hatasinda_false_ve_none_doner(self, veri):
+        """Veritabanı bağlantısı sırasında bir hata oluşursa fonksiyon
+        çökmemeli, (False, None) dönmeli."""
+        veri.baglanti_getir = MagicMock(side_effect=Error("Bağlantı koptu"))
+
+        sonuc = veri.kullanici_dogrula("yonetici", "herhangi_bir_sifre")
+
+        assert sonuc == (False, None)
+
+
+# ----------------------------------------------------------------------
+# siparis_onayla testleri
+# ----------------------------------------------------------------------
+
+class TestSiparisOnayla:
+
+    def test_gecerli_siparis_onaylanir_ve_stok_artar(self, veri):
+        """Sipariş bulunuyorsa: Purchase_Orders güncellenmeli, Products
+        stoğu artırılmalı, commit edilmeli ve True dönmeli."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "ProductName": "Kablosuz Mouse",
+            "OrderQuantity": 50,
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        sonuc = veri.siparis_onayla(order_id=7)
+
+        assert sonuc is True
+        fake_conn.commit.assert_called_once()
+        # İki UPDATE de çalıştırılmış olmalı (Purchase_Orders + Products)
+        calistirilan_sorgular = [c.args[0] for c in fake_cursor.execute.call_args_list]
+        assert any("UPDATE Purchase_Orders" in s for s in calistirilan_sorgular)
+        assert any("UPDATE Products" in s for s in calistirilan_sorgular)
+
+    def test_olmayan_siparis_false_doner(self, veri):
+        """Verilen OrderID'ye ait bir sipariş bulunamazsa False dönmeli
+        ve hiçbir UPDATE/commit çalışmamalı."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = None
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        sonuc = veri.siparis_onayla(order_id=999)
+
+        assert sonuc is False
+        fake_conn.commit.assert_not_called()
+
+    def test_hata_durumunda_false_doner_ve_rollback_yapilir(self, veri):
+        """İşlem sırasında bir hata oluşursa fonksiyon çökmemeli, False
+        dönmeli ve rollback çağrılmalı."""
+        fake_conn = MagicMock()
+        fake_conn.cursor.side_effect = Exception("Bağlantı koptu")
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        sonuc = veri.siparis_onayla(order_id=7)
+
+        assert sonuc is False
+        fake_conn.rollback.assert_called_once()
+
+
+# ----------------------------------------------------------------------
+# urun_islemleri testleri
+# ----------------------------------------------------------------------
+
+class TestUrunIslemleri:
+
+    def test_urun_ekleme_dogru_parametrelerle_insert_calistirir(self, veri):
+        """islem='ekle' verildiğinde INSERT doğru parametrelerle
+        çalışmalı (fiyat float'a, stok int'e çevrilmeli) ve commit
+        edilmeli."""
+        fake_cursor = MagicMock()
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        veri.urun_islemleri("Yeni Ürün", "199.90", "25", islem="ekle")
+
+        insert_cagrisi = fake_cursor.execute.call_args
+        assert "INSERT INTO Products" in insert_cagrisi.args[0]
+        assert insert_cagrisi.args[1] == ("Yeni Ürün", 199.90, 25)
+        fake_conn.commit.assert_called_once()
+
+    def test_urun_silme_dogru_urunu_siler(self, veri):
+        """islem='sil' verildiğinde (veya 'ekle' dışında herhangi bir
+        değerde) DELETE çalışmalı."""
+        fake_cursor = MagicMock()
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        veri.urun_islemleri("Eski Ürün", 0, 0, islem="sil")
+
+        delete_cagrisi = fake_cursor.execute.call_args
+        assert "DELETE FROM Products" in delete_cagrisi.args[0]
+        assert delete_cagrisi.args[1] == ("Eski Ürün",)
+        fake_conn.commit.assert_called_once()
+
+    def test_hata_durumunda_sessizce_loglanir_ve_commit_edilmez(self, veri):
+        """execute() bir hata fırlatırsa fonksiyon dışarıya exception
+        sızdırmamalı (dashboard.py'nin çökmemesi için kritik) ve commit
+        çalışmamalı."""
+        fake_cursor = MagicMock()
+        fake_cursor.execute.side_effect = Error("Kısıtlama ihlali")
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        # Exception fırlatmadan tamamlanmalı:
+        veri.urun_islemleri("Sorunlu Ürün", 10.0, 5, islem="ekle")
+
+        fake_conn.commit.assert_not_called()
