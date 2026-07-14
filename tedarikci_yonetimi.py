@@ -1,5 +1,7 @@
 import os
 import mysql.connector
+from database import DashboardVeriErisim
+from config import VARSAYILAN_KRITIK_SEVIYE, OTOMATIK_SIPARIS_MIKTARI
 from mysql.connector import Error
 from typing import Optional, Dict
 from dotenv import load_dotenv
@@ -30,9 +32,11 @@ class TedarikciYonetimi:
         try:
             self.db = mysql.connector.connect(
                 host=self.host,
+                port=int(os.getenv("DB_PORT", 3306)),
                 user=self.user,
                 password=self.password,
-                database=self.database
+                database=self.database,
+                charset='utf8mb4'
             )
             self.cursor = self.db.cursor(dictionary=True)
             return True
@@ -42,11 +46,12 @@ class TedarikciYonetimi:
 
     def tedarikci_bilgisi_getir(self, urun_adi: str) -> Optional[Dict]:
         """SQL kullanarak girilen ürünün tedarikçi detaylarını bulur."""
+        varsayilan = {"firma": "Bağlantı Yok", "teslimat_gunu": 0, "eposta": None, "telefon": None}
         if not self.db or not self.cursor:
-            return {"firma": "Bağlantı Yok", "teslimat_gunu": 0}
+            return varsayilan
 
         sorgu = """
-            SELECT s.SupplierName, s.LeadTimeDays
+            SELECT s.SupplierName, s.LeadTimeDays, s.ContactEmail, s.ContactPhone
             FROM Products p
             LEFT JOIN Suppliers s ON p.SupplierID = s.SupplierID
             WHERE p.ProductName = %s
@@ -56,38 +61,64 @@ class TedarikciYonetimi:
             sonuc = self.cursor.fetchone()
 
             if sonuc and sonuc['SupplierName']:
-                return {"firma": sonuc['SupplierName'], "teslimat_gunu": sonuc['LeadTimeDays']}
-            return {"firma": "Bilinmeyen Tedarikçi (Sisteme Kayıt Edilmeli)", "teslimat_gunu": 0}
+                return {
+                    "firma": sonuc['SupplierName'],
+                    "teslimat_gunu": sonuc['LeadTimeDays'],
+                    "eposta": sonuc['ContactEmail'],
+                    "telefon": sonuc['ContactPhone'],
+                }
+            return {"firma": "Bilinmeyen Tedarikçi (Sisteme Kayıt Edilmeli)", "teslimat_gunu": 0,
+                     "eposta": None, "telefon": None}
 
         except Error as e:
             print(f"HATA: Tedarikçi bilgisi çekilemedi. Detay: {e}")
-            return {"firma": "Hata Oluştu", "teslimat_gunu": 0}
+            return {"firma": "Hata Oluştu", "teslimat_gunu": 0, "eposta": None, "telefon": None}
 
-    def satin_alma_talebi_olustur(self, urun_adi: str, mevcut_stok: int, kritik_seviye: int = VARSAYILAN_KRITIK_SEVIYE) -> bool:
-        """Stok yetersizse veritabanından tedarikçiyi bulup siparişi tetikler."""
+    def satin_alma_talebi_olustur(
+    self,
+    urun_adi: str,
+    mevcut_stok: int,
+    kritik_seviye: int = VARSAYILAN_KRITIK_SEVIYE,
+    siparis_miktari: int = OTOMATIK_SIPARIS_MIKTARI,
+    ) -> bool:
+        """Stok yetersizse tedarikçiyi bulup GERÇEK bir Purchase_Orders kaydı oluşturur."""
         if mevcut_stok >= kritik_seviye:
             print(f"DURUM: {urun_adi} için stok seviyesi yeterli ({mevcut_stok} adet). İşlem yapılmadı.")
             return False
 
         tedarikci_bilgisi = self.tedarikci_bilgisi_getir(urun_adi)
-        self._siparisi_sisteme_kaydet(urun_adi, mevcut_stok, tedarikci_bilgisi)
-        return True
+        return self._siparisi_sisteme_kaydet(urun_adi, mevcut_stok, tedarikci_bilgisi, siparis_miktari)
 
-    def _siparisi_sisteme_kaydet(self, urun_adi: str, mevcut_stok: int, tedarikci_bilgisi: Dict) -> None:
-        """Siparişi ekrana basar (İleride burada veritabanına sipariş kaydı atılabilir)."""
+    def _siparisi_sisteme_kaydet(self, urun_adi: str, mevcut_stok: int, tedarikci_bilgisi: Dict, siparis_miktari: int) -> bool:
+        """
+        Siparişi Purchase_Orders tablosuna yazar. Mükerrer kontrolü ve INSERT
+        mantığı database.py'deki DashboardVeriErisim.otomatik_siparis_taslagi_olustur
+        içinde merkezi tutuluyor; hem dashboard.py hem main.py aynı tek
+        kaynaktan sipariş açıyor, artık iki farklı implementasyon birbirinden
+        sapmıyor (bkz. bir önceki mimari tutarsızlık tartışmamız).
+        """
         print("\n--- 🚨 OTOMATİK SATIN ALMA TALEBİ ---")
         print(f"Ürün: {urun_adi}")
         print(f"Mevcut Stok: {mevcut_stok} (Kritik sınırın altında!)")
         print(f"Tedarikçi: {tedarikci_bilgisi['firma']}")
         print(f"Tahmini Teslimat: {tedarikci_bilgisi['teslimat_gunu']} gün içinde.")
-        print("Sistem üzerinden yönetici onayı bekleniyor...\n")
+
+        veri_erisimi = DashboardVeriErisim()
+        olusturuldu = veri_erisimi.otomatik_siparis_taslagi_olustur(urun_adi, siparis_miktari)
+
+        if olusturuldu:
+            print(f"✅ Sipariş veritabanına kaydedildi ({siparis_miktari} adet). Yönetici onayı bekleniyor.\n")
+        else:
+            print(f"ℹ️ {urun_adi} için zaten bekleyen bir sipariş var, yenisi açılmadı.\n")
+
+        return olusturuldu
 
     def baglantiyi_kapat(self) -> None:
         """Veritabanı bağlantısını güvenlice kapatır."""
         if self.cursor:
-            self.cursor.close()
+                self.cursor.close()
         if self.db and self.db.is_connected():
-            self.db.close()
+                self.db.close()
 
 # Modül testi
 if __name__ == "__main__":

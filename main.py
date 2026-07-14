@@ -25,16 +25,14 @@ def erp_sistemini_calistir():
     time.sleep(1)  # Sistem akışı hissi için kısa bir bekleme
 
     # 2. Tedarikçi Yönetimi ve Otomatik Sipariş Katmanı
+    # 2. Tedarikçi Yönetimi ve Otomatik Sipariş Katmanı
     print("\n[ADIM 2] Tedarikçi ve Satın Alma modülü devreye giriyor...")
     tedarikci_modulu = TedarikciYonetimi()
 
     if tedarikci_modulu.baglan():
         for satir in rapor:
             urun_adi = satir[0]
-            toplam_satis = int(satir[1]) if satir[1] is not None else 0
-
-            # Simülasyon: Sisteme başlangıçta her üründen 100 adet girildiğini varsayalım.
-            mevcut_stok = 100 - toplam_satis
+            mevcut_stok = int(satir[1]) if satir[1] is not None else 0
 
             # Eğer mevcut stok kritik seviyenin altına indiyse sistem otomatik sipariş geçecek
             tedarikci_modulu.satin_alma_talebi_olustur(
@@ -46,7 +44,6 @@ def erp_sistemini_calistir():
         tedarikci_modulu.baglantiyi_kapat()
 
     time.sleep(1)
-
     # 3. Yönetici Paneli (Dashboard) Başlatma
     print("\n[ADIM 3] Streamlit Yönetici Paneli başlatılıyor...")
     print("Tarayıcınızda otomatik olarak yeni bir sekme açılacaktır.\n")

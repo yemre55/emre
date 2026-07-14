@@ -7,6 +7,7 @@ import io
 import logging
 from database import DashboardVeriErisim
 from services import kritik_stok_eposta_tetikle
+from tedarikci_yonetimi import TedarikciYonetimi
 from config import KRITIK_STOK_ESIGI, OTOMATIK_SIPARIS_MIKTARI, TAHMIN_GUN_ESIGI
 
 warnings.filterwarnings("ignore")
@@ -35,7 +36,15 @@ logging.basicConfig(
 # ttl=30: veri en fazla 30 saniye "bayat" kalabilir. Yazma işlemlerinden sonra
 # ayrıca st.cache_data.clear() ile anında da temizleniyor (bkz. aşağıdaki
 # ilgili form/buton blokları).
-
+@st.cache_resource
+def veri_erisimi_al() -> DashboardVeriErisim:
+    """
+    DashboardVeriErisim (ve içindeki MySQL connection pool) yalnızca BİR KEZ
+    oluşturulur ve tüm oturumlar arasında paylaşılır. @st.cache_data'nın
+    aksine @st.cache_resource, DB bağlantısı/pool gibi "paylaşılan, yeniden
+    kullanılabilir kaynaklar" içindir — her rerun'da yeniden oluşturulmaz.
+    """
+    return DashboardVeriErisim()
 @st.cache_data(ttl=30)
 def stok_listesi_cache(_veri):
     return _veri.stok_listesini_getir()
@@ -55,6 +64,22 @@ def onay_bekleyenler_cache(_veri):
 @st.cache_data(ttl=30)
 def log_verileri_cache(_veri):
     return _veri.log_verilerini_getir()
+
+@st.cache_data(ttl=60)
+def tedarikci_bilgisi_cache(urun_adi):
+    """
+    tedarikci_yonetimi.py, dashboard.py'nin bağlantı havuzundan bağımsız
+    kendi kısa ömürlü bağlantısını açar (main.py'deki CLI kullanımıyla
+    aynı modül). Sonuç 60 saniye önbelleğe alınır; tedarikçi bilgisi sık
+    değişen bir veri olmadığı için bu makul bir süre.
+    """
+    tedarikci = TedarikciYonetimi()
+    if tedarikci.baglan():
+        try:
+            return tedarikci.tedarikci_bilgisi_getir(urun_adi)
+        finally:
+            tedarikci.baglantiyi_kapat()
+    return {"firma": "Bağlantı Yok", "teslimat_gunu": 0, "eposta": None, "telefon": None}
 
 
 # --- AKILLI BİLDİRİM MOTORU (E-POSTA SİMÜLASYONU) ---
@@ -96,7 +121,7 @@ def arayuzu_ciz():
     if 'giris_yapildi' not in st.session_state:
         st.session_state.update({'giris_yapildi': False, 'rol': None, 'kullanici_adi': None, 'eposta_gonderildi': set()})
 
-    veri = DashboardVeriErisim()
+    veri = veri_erisimi_al()
 
     if not st.session_state['giris_yapildi']:
         st.title("🔒 ERP Giriş")
@@ -195,24 +220,46 @@ def arayuzu_ciz():
                     st.markdown("**Kritik Ürün Siparişi Oluştur**")
                     secilen_urun = st.selectbox("Tedarik Edilecek Ürün", bildirim_listesi)
                     siparis_adedi = st.number_input("Sipariş Adedi", min_value=10, step=10)
+
+                    # Gerçek tedarikçi bilgisini SQL'den çekip seçim yapılırken gösteriyoruz
+                    tedarikci_bilgisi = tedarikci_bilgisi_cache(secilen_urun)
+                    st.caption(
+                        f"📦 Tedarikçi: **{tedarikci_bilgisi['firma']}**  |  "
+                        f"Tahmini Teslimat: **{tedarikci_bilgisi['teslimat_gunu']} gün**"
+                    )
+                    if tedarikci_bilgisi.get('eposta') or tedarikci_bilgisi.get('telefon'):
+                        st.caption(
+                            f"✉️ {tedarikci_bilgisi.get('eposta') or '—'}  |  "
+                            f"📞 {tedarikci_bilgisi.get('telefon') or '—'}"
+                        )
+
                     siparis_ver = st.button("Tedarikçiye Sipariş Geç", type="primary", use_container_width=True)
 
                 with po_col2:
                     if siparis_ver:
-                        tarih = pd.Timestamp.now().strftime("%d.%m.%Y %H:%M")
-                        st.success("✅ Satın Alma Talebi (PO) başarıyla oluşturuldu ve tedarikçiye iletildi.")
+                        # Sipariş, Purchase_Orders tablosuna gerçekten yazılıyor (mükerrer
+                        # kontrolüyle birlikte); "Onay Bekleyen Siparişler" listesinde görünür.
+                        olusturuldu = veri.otomatik_siparis_taslagi_olustur(secilen_urun, int(siparis_adedi))
 
-                        st.info(f"""
-                        **📄 SATIN ALMA SİPARİŞ FİŞİ (PO-2026-X)**
+                        if olusturuldu:
+                            st.cache_data.clear()
+                            tarih = pd.Timestamp.now().strftime("%d.%m.%Y %H:%M")
+                            st.success("✅ Satın Alma Talebi (PO) veritabanına kaydedildi.")
+                            st.info(f"""
+                            **📄 SATIN ALMA SİPARİŞ FİŞİ**
 
-                        * **Tarih/Saat:** {tarih}
-                        * **Talep Eden:** {st.session_state['kullanici_adi']} (Yönetici)
-                        * **Tedarik Edilecek Ürün:** {secilen_urun}
-                        * **Talep Edilen Miktar:** {siparis_adedi} Adet
-                        * **Durum:** Beklemede / Tedarikçi Onayı İsteniyor
+                            * **Tarih/Saat:** {tarih}
+                            * **Talep Eden:** {st.session_state['kullanici_adi']} (Yönetici)
+                            * **Tedarik Edilecek Ürün:** {secilen_urun}
+                            * **Talep Edilen Miktar:** {siparis_adedi} Adet
+                            * **Tedarikçi:** {tedarikci_bilgisi['firma']}
+                            * **Tahmini Teslimat:** {tedarikci_bilgisi['teslimat_gunu']} gün
+                            * **Durum:** Beklemede / Yönetici Onayı Bekliyor
 
-                        *Sistem bu talebi otomatik olarak ilgili departmanların e-posta adreslerine taslak olarak düşürmüştür.*
-                        """)
+                            Sipariş, aşağıdaki "Onay Bekleyen Satın Alma Siparişleri" listesinde görünecektir.
+                            """)
+                        else:
+                            st.warning(f"ℹ️ {secilen_urun} için zaten bekleyen bir sipariş var, yenisi açılmadı.")
 
             st.subheader("📦 Onay Bekleyen Satın Alma Siparişleri")
 

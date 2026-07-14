@@ -22,8 +22,11 @@ class DashboardVeriErisim:
             host=os.getenv("DB_HOST"),
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
-            database=os.getenv("DB_NAME")
+            port=int(os.getenv("DB_PORT", 3306)),
+            database=os.getenv("DB_NAME"),
+            charset='utf8mb4'
         )
+        
 
     def baglanti_getir(self):
         return self.db_pool.get_connection()
@@ -212,20 +215,29 @@ class DashboardVeriErisim:
         finally:
             if db: db.close()
 
-    def stok_analizi_getir(self):
+    def stok_analizi_getir(self, gun_penceresi: int = 30):
+        """
+        NOT: Toplam_Satis artık TÜM ZAMANLARIN toplamı değil, son
+        `gun_penceresi` (varsayılan 30) gün içindeki satışların toplamı.
+        Önceden tarih filtresi yoktu; bu da "tüm zamanlar toplamı / 30"
+        gibi anlamsız (ve firma büyüdükçe/yıllar geçtikçe giderek
+        yanlışlaşan) bir günlük satış hızı üretiyordu. SaleDate sütunu
+        zaten Sales_Details şemasında mevcut, sadece kullanılmıyordu.
+        """
         db = None
         try:
             db = self.baglanti_getir()
             query = """
             SELECT p.ProductName, p.StockQuantity, p.UnitPrice,
-                   COALESCE(SUM(s.Quantity), 0) as Toplam_Satis
+                   COALESCE(SUM(CASE WHEN s.SaleDate >= NOW() - INTERVAL %s DAY
+                                      THEN s.Quantity ELSE 0 END), 0) as Toplam_Satis
             FROM Products p
             LEFT JOIN Sales_Details s ON p.ProductID = s.ProductID
             GROUP BY p.ProductName, p.StockQuantity, p.UnitPrice
             """
-            df = pd.read_sql(query, db)
+            df = pd.read_sql(query, db, params=(gun_penceresi,))
 
-            df['Gunluk_Satis_Hizi'] = df['Toplam_Satis'] / 30
+            df['Gunluk_Satis_Hizi'] = df['Toplam_Satis'] / gun_penceresi
             df['Kalan_Gun_Tahmini'] = np.where(
                 df['Gunluk_Satis_Hizi'] > 0,
                 (df['StockQuantity'] / df['Gunluk_Satis_Hizi']).round(0),

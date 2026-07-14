@@ -20,11 +20,21 @@ CREATE TABLE IF NOT EXISTS Users (
     Role          ENUM('Yonetici', 'Depo_Calisani') NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS Suppliers (
+    SupplierID    INT AUTO_INCREMENT PRIMARY KEY,
+    SupplierName  VARCHAR(200) NOT NULL,
+    LeadTimeDays  INT NOT NULL DEFAULT 0,
+    ContactEmail  VARCHAR(200),
+    ContactPhone  VARCHAR(50)
+);
+
 CREATE TABLE IF NOT EXISTS Products (
     ProductID     INT AUTO_INCREMENT PRIMARY KEY,
     ProductName   VARCHAR(200) NOT NULL UNIQUE,
     UnitPrice     DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-    StockQuantity INT NOT NULL DEFAULT 0
+    StockQuantity INT NOT NULL DEFAULT 0,
+    SupplierID    INT NULL,
+    FOREIGN KEY (SupplierID) REFERENCES Suppliers(SupplierID)
 );
 
 CREATE TABLE IF NOT EXISTS Sales_Details (
@@ -56,13 +66,42 @@ CREATE TABLE IF NOT EXISTS AuditLogs (
 -- ==========================================================
 -- Örnek veri (opsiyonel) — istemezseniz bu bölümü silin
 -- ==========================================================
-INSERT INTO Products (ProductName, UnitPrice, StockQuantity) VALUES
-    ('Kablosuz Mouse', 249.90, 40),
-    ('Mekanik Klavye', 899.00, 15),
-    ('USB-C Hub', 349.50, 3)
+INSERT INTO Suppliers (SupplierName, LeadTimeDays, ContactEmail, ContactPhone) VALUES
+    ('Anka Elektronik Ltd.', 3, 'siparis@ankaelektronik.com.tr', '0212 555 10 20'),
+    ('Bilişim Tedarik A.Ş.', 7, 'satis@bilisimtedarik.com.tr', '0216 555 30 40')
+ON DUPLICATE KEY UPDATE SupplierName = SupplierName;
+
+INSERT INTO Products (ProductName, UnitPrice, StockQuantity, SupplierID) VALUES
+    ('Kablosuz Mouse', 249.90, 40, 1),
+    ('Mekanik Klavye', 899.00, 15, 1),
+    ('USB-C Hub', 349.50, 3, 2)
 ON DUPLICATE KEY UPDATE ProductName = ProductName;
 
 -- NOT: Admin kullanıcısını buraya düz metin şifreyle EKLEMİYORUZ çünkü
 -- PasswordHash bcrypt ile üretilmeli. Konteynerler ayağa kalktıktan
 -- sonra bir kullanıcı eklemek için README'deki "İlk kullanıcıyı oluşturma"
 -- bölümündeki tek satırlık Python komutunu kullanın.
+
+-- ==========================================================
+-- ÖNEMLİ — MEVCUT (ZATEN İLKLENDİRİLMİŞ) ORTAMLAR İÇİN NOT:
+-- ==========================================================
+-- Bu dosya sadece MySQL veri klasörü BOŞKEN (konteyner ilk kez
+-- oluşturulduğunda) otomatik çalışır. Daha önce "docker-compose up"
+-- çalıştırdıysanız ve bir veri klasörünüz (volume) zaten varsa, Suppliers
+-- tablosu ve Products.SupplierID sütunu otomatik eklenmez. Mevcut
+-- veritabanınızda bunu manuel çalıştırmanız gerekir:
+--
+--   CREATE TABLE IF NOT EXISTS Suppliers (
+--       SupplierID    INT AUTO_INCREMENT PRIMARY KEY,
+--       SupplierName  VARCHAR(200) NOT NULL,
+--       LeadTimeDays  INT NOT NULL DEFAULT 0,
+--       ContactEmail  VARCHAR(200),
+--       ContactPhone  VARCHAR(50)
+--   );
+--
+--   ALTER TABLE Products ADD COLUMN SupplierID INT NULL,
+--       ADD FOREIGN KEY (SupplierID) REFERENCES Suppliers(SupplierID);
+--
+-- Alternatif: geliştirme ortamında veriyi kaybetmeyi göze alıyorsanız
+-- "docker-compose down -v" ile volume'u silip yeniden "up" yapmak da
+-- bu dosyayı sıfırdan çalıştırır.

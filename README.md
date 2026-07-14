@@ -100,9 +100,7 @@ ruff check .
 └── .github/workflows/ci.yml
 ```
 
-> Not: `main.py` (CLI orkestrasyon betiği) bu pakete dahil edilmemiştir çünkü
-> bu depoda yer almayan `stok_takip.py` ve `tedarikci_yonetimi.py`
-> modüllerine bağımlıdır. Docker imajı doğrudan `dashboard.py`'yi çalıştırır.
+
 
 ## Ortam Değişkenleri
 

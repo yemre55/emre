@@ -1,9 +1,9 @@
 # --- ERP Streamlit Uygulaması (multi-stage build) ---
-# NOT: main.py bilinçli olarak burada KULLANILMIYOR. main.py, bu sohbette
-# paylaşılmamış olan stok_takip.py ve tedarikci_yonetimi.py modüllerine
-# bağımlı; konteyner doğrudan dashboard.py'yi (Streamlit uygulamasının
-# kendisi) çalıştırıyor. main.py'yi de dahil etmek isterseniz o iki
-# dosyayı da projeye eklemeniz ve CMD'yi güncellemeniz gerekir.
+# NOT: main.py bilinçli olarak burada KULLANILMIYOR. main.py, ayrı bir CLI
+# akışı (stok_takip.py bağımlılığıyla) için tasarlanmış; konteyner doğrudan
+# dashboard.py'yi (Streamlit uygulamasının kendisi) çalıştırıyor.
+# tedarikci_yonetimi.py artık dashboard.py tarafından da kullanıldığı için
+# (gerçek tedarikçi/teslimat bilgisi çekmek üzere) imaja dahil edilmiştir.
 #
 # NEDEN MULTI-STAGE?
 # gcc / libmysqlclient-dev / pkg-config gibi paketler SADECE bazı Python
@@ -55,7 +55,7 @@ COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
 # Uygulama kodunun tamamı
-COPY dashboard.py database.py services.py config.py ./
+COPY dashboard.py database.py services.py config.py tedarikci_yonetimi.py ./
 COPY .streamlit ./.streamlit
 
 EXPOSE 8501
