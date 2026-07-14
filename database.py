@@ -15,10 +15,18 @@ load_dotenv()
 # --- VERİ ERİŞİM KATMANI ---
 class DashboardVeriErisim:
     def __init__(self):
+        # NOT: pool_size 32'den .env üzerinden ayarlanabilir bir değere
+        # düşürüldü (varsayılan 8). MySQL'in varsayılan max_connections
+        # değeri genelde 151'dir; birden fazla süreç (Streamlit dashboard,
+        # main.py, sifre_guncelle.py vb.) aynı anda çalıştığında her biri
+        # kendi havuzunu açar. 32 gibi büyük bir havuz, küçük/orta ölçekli
+        # bu sistem için gereğinden fazla bağlantı ayırıp diğer süreçleri
+        # veya MySQL sunucusunun kendisini sıkıştırabilir. İhtiyaç
+        # duyulursa DB_POOL_SIZE ile artırılabilir.
         # Havuz bir kez oluşturulur ve sınıfın bir özelliği olur
         self.db_pool = pooling.MySQLConnectionPool(
             pool_name="erp_pool",
-            pool_size=32,
+            pool_size=int(os.getenv("DB_POOL_SIZE", 8)),
             host=os.getenv("DB_HOST"),
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
@@ -122,11 +130,23 @@ class DashboardVeriErisim:
         finally:
             if db: db.close()
 
-    def log_verilerini_getir(self):
+    def log_verilerini_getir(self, limit: int = 500):
+        """
+        NOT: Sorguya LIMIT eklendi. Önceden AuditLogs tablosundaki TÜM
+        satırlar çekiliyordu; tablo büyüdükçe (her stok güncellemesi,
+        her ürün işlemi bir satır eklediği için hızla büyür) bu sorgu
+        ve dashboard'daki dataframe render'ı giderek yavaşlıyordu.
+        Varsayılan olarak en güncel 500 kayıt getirilir, dashboard
+        gerekirse limit parametresiyle daha fazlasını isteyebilir.
+        """
         db = None
         try:
             db = self.baglanti_getir()
-            df = pd.read_sql("SELECT * FROM AuditLogs ORDER BY Timestamp DESC", db)
+            df = pd.read_sql(
+                "SELECT * FROM AuditLogs ORDER BY Timestamp DESC LIMIT %s",
+                db,
+                params=(limit,),
+            )
             return df
         except Error as e:
             logging.error(f"Denetim izi logları çekilirken hata: {e}")
@@ -184,8 +204,19 @@ class DashboardVeriErisim:
             cursor = db.cursor()
             if islem == "ekle":
                 cursor.execute("INSERT INTO Products (ProductName, UnitPrice, StockQuantity) VALUES (%s, %s, %s)", (ad, float(fiyat), int(stok)))
-            else:
+            elif islem == "sil":
                 cursor.execute("DELETE FROM Products WHERE ProductName = %s", (ad,))
+            else:
+                # DÜZELTİLDİ: Önceden tanınmayan HER değer (örn. yazım hatası
+                # "sill", boş string, None) sessizce DELETE'e düşüyordu.
+                # Bu, beklenmedik/hatalı bir çağrının ürünü yanlışlıkla
+                # silmesine yol açabilecek riskli bir varsayılandı.
+                # Artık sadece loglanıyor, hiçbir veritabanı işlemi yapılmıyor.
+                logging.warning(
+                    f"urun_islemleri: tanınmayan islem değeri '{islem}' "
+                    f"(ürün: {ad}). Hiçbir işlem yapılmadı."
+                )
+                return
             db.commit()
         except Error as e:
             logging.error(f"Ürün işlemi başarısız: {e}")
