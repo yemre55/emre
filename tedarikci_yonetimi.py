@@ -5,7 +5,7 @@ from config import VARSAYILAN_KRITIK_SEVIYE, OTOMATIK_SIPARIS_MIKTARI
 from mysql.connector import Error
 from typing import Optional, Dict
 from dotenv import load_dotenv
-from config import VARSAYILAN_KRITIK_SEVIYE
+
 
 load_dotenv()
 
