@@ -6,7 +6,7 @@ import numpy as np
 import bcrypt
 from typing import Optional, Tuple
 from dotenv import load_dotenv
-from mysql.connector import pooling, Error
+from mysql.connector import pooling
 
 from config import MAX_BASARISIZ_GIRIS_DENEMESI, HESAP_KILITLEME_SURESI_DAKIKA
 
@@ -118,7 +118,13 @@ class DashboardVeriErisim:
             db.commit()
             return False, None
 
-        except Error as e:
+        except Exception as e:
+            # NOT (madde 7): Önceden sadece mysql.connector.Error
+            # yakalanıyordu. Bu fonksiyon dashboard.py'nin giriş ekranından
+            # çağrıldığı için, pandas/bcrypt kaynaklı veya öngörülemeyen
+            # başka bir hata da dashboard'u çökertmemeli. Diğer tüm
+            # DashboardVeriErisim fonksiyonlarıyla TUTARLI olması için
+            # genel Exception yakalanıyor.
             logging.error(f"Kimlik doğrulama sırasında bir veritabanı hatası oluştu: {e}")
             return False, None
         finally:
@@ -130,7 +136,11 @@ class DashboardVeriErisim:
             db = self.baglanti_getir()
             df = pd.read_sql("SELECT ProductName, StockQuantity, UnitPrice FROM Products", db)
             return df
-        except Error as e:
+        except Exception as e:
+            # NOT (madde 7): Error yerine Exception yakalanıyor; pd.read_sql
+            # mysql.connector.Error dışında bir istisna da fırlatabilir
+            # (örn. pandas/DB sürücü uyumsuzluğu) ve bu fonksiyon dashboard'un
+            # çökmesine yol açmamalı.
             logging.error(f"Stok listesi çekilirken hata oluştu: {e}")
             return None
         finally:
@@ -149,7 +159,8 @@ class DashboardVeriErisim:
             cursor.execute("INSERT INTO AuditLogs (Username, Action, ProductName, OldValue, NewValue) VALUES (%s, %s, %s, %s, %s)",
                            (username, "Stok Güncelleme", urun_adi, eski, yeni_miktar))
             db.commit()
-        except Error as e:
+        except Exception as e:
+            # NOT (madde 7): Error yerine Exception (bkz. stok_listesini_getir notu).
             logging.error(f"Stok güncellenirken hata oluştu: {e}")
         finally:
             if db: db.close()
@@ -208,7 +219,8 @@ class DashboardVeriErisim:
                 params=(limit,),
             )
             return df
-        except Error as e:
+        except Exception as e:
+            # NOT (madde 7): Error yerine Exception (bkz. stok_listesini_getir notu).
             logging.error(f"Denetim izi logları çekilirken hata: {e}")
             return None
         finally:
@@ -278,7 +290,8 @@ class DashboardVeriErisim:
                 )
                 return
             db.commit()
-        except Error as e:
+        except Exception as e:
+            # NOT (madde 7): Error yerine Exception (bkz. stok_listesini_getir notu).
             logging.error(f"Ürün işlemi başarısız: {e}")
         finally:
             if db: db.close()

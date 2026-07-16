@@ -26,7 +26,8 @@ from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta
 import pandas as pd
 
-from database import DashboardVeriErisim, Error
+from database import DashboardVeriErisim
+from mysql.connector import Error
 from tedarikci_yonetimi import TedarikciYonetimi
 
 
