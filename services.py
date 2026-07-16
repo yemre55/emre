@@ -12,7 +12,14 @@ logging.basicConfig(
     filename='erp_sistem.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    # NOT (madde 8): encoding açıkça 'utf-8' olarak belirtildi. Aksi halde
+    # Python, log dosyasını işletim sisteminin/ortamın varsayılan
+    # yerelleştirme (locale) charset'iyle açar; bu değer platforma göre
+    # değişebilir ve bazı ortamlarda (özellikle Windows'ta Türkçe olmayan
+    # bir locale ile) Türkçe karakterler (ç, ğ, ı, ö, ş, ü) loga yazılırken
+    # UnicodeEncodeError'a veya bozuk (mojibake) karakterlere yol açabilir.
+    encoding='utf-8'
 )
 
 # Çevresel değişkenleri yüklüyoruz
@@ -194,3 +201,4 @@ def kritik_stok_eposta_tetikle(urun_adi, kalan_stok):
     except Exception as e:
         logging.error(f"HTML E-posta gönderim hatası ({urun_adi}): {e}")
         return False
+

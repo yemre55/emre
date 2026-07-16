@@ -30,10 +30,15 @@ class StokTakip:
         try:
             self.db = mysql.connector.connect(
                 host=self.host,
-                port=int(os.getenv("DB_PORT", 3306)),
                 user=self.user,
                 password=self.password,
-                database=self.database
+                database=self.database,
+                # NOT (madde 8): Diğer tüm bağlantılarla (database.py,
+                # tedarikci_yonetimi.py) tutarlı olması için charset açıkça
+                # utf8mb4 olarak ayarlandı. Aksi halde Türkçe karakterler
+                # (ç, ğ, ı, ö, ş, ü) sürücünün/sunucunun varsayılan charset'ine
+                # göre bozuk (mojibake) görünebilir veya hataya yol açabilir.
+                charset='utf8mb4'
             )
             self.cursor = self.db.cursor()
             return True
@@ -42,11 +47,16 @@ class StokTakip:
             return False
 
     def kritik_stok_raporu_getir(self) -> List[Tuple[str, int]]:
-        """Ürünlerin GERÇEK (o anki) stok miktarlarını Products tablosundan çeker."""
+        """Sadece veritabanından satış toplamlarını çeker ve veriyi döndürür (Ekrana yazdırmaz)."""
         if not self.db or not self.cursor:
             return []
 
-        sorgu = "SELECT ProductName, StockQuantity FROM Products"
+        sorgu = """
+            SELECT p.ProductName, SUM(d.Quantity) as Toplam_Satis
+            FROM Sales_Details d
+            JOIN Products p ON d.ProductID = p.ProductID
+            GROUP BY p.ProductName
+        """
         try:
             self.cursor.execute(sorgu)
             return self.cursor.fetchall()
@@ -55,7 +65,7 @@ class StokTakip:
             return []
 
     def raporu_yazdir(self) -> None:
-        """Çekilen veriyi alır, iş mantığına göre değerlendirip ekrana basar."""
+        """Çekilen veriyi alır, iş mantığına (business logic) göre değerlendirip ekrana basar."""
         results = self.kritik_stok_raporu_getir()
 
         if not results:
@@ -65,12 +75,12 @@ class StokTakip:
         print("\n--- KRİTİK STOK RAPORU ---")
         for row in results:
             urun_adi = row[0]
-            mevcut_stok = int(row[1]) if row[1] is not None else 0
+            toplam_satis = int(row[1]) if row[1] is not None else 0
 
-            if mevcut_stok < self.kritik_seviye:
-                print(f"UYARI: {urun_adi} kritik seviyenin altında! Mevcut stok: {mevcut_stok}. Sipariş gerekli.")
+            if toplam_satis > self.kritik_seviye:
+                print(f"UYARI: {urun_adi} çok hızlı satıldı! Toplam çıkış: {toplam_satis}. Stok yenilenmeli.")
             else:
-                print(f"DURUM: {urun_adi} için stok durumu stabil. Mevcut stok: {mevcut_stok}.")    
+                print(f"DURUM: {urun_adi} için stok durumu stabil. Toplam çıkış: {toplam_satis}.")
 
     def baglantiyi_kapat(self) -> None:
         """Açık bağlantıları temizler."""
@@ -85,3 +95,4 @@ if __name__ == "__main__":
     if stok_yoneticisi.baglan():
         stok_yoneticisi.raporu_yazdir()
         stok_yoneticisi.baglantiyi_kapat()
+

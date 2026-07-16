@@ -56,6 +56,8 @@ def sifreleri_bcrypt_yap(yeni_sifre_metni="123456", onay_atla=False):
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
             database=db_name,
+            # NOT (madde 8): bkz. stok_takip.py'deki aynı not.
+            charset='utf8mb4',
         )
         cursor = db.cursor(dictionary=True)
 

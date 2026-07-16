@@ -17,7 +17,9 @@ logging.basicConfig(
     filename='erp_sistem.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    # NOT (madde 8): bkz. services.py'deki aynı not.
+    encoding='utf-8'
 )
 
 # .env dosyasındaki veritabanı şifrelerini sisteme yüklüyoruz
@@ -36,15 +38,7 @@ logging.basicConfig(
 # ttl=30: veri en fazla 30 saniye "bayat" kalabilir. Yazma işlemlerinden sonra
 # ayrıca st.cache_data.clear() ile anında da temizleniyor (bkz. aşağıdaki
 # ilgili form/buton blokları).
-@st.cache_resource
-def veri_erisimi_al() -> DashboardVeriErisim:
-    """
-    DashboardVeriErisim (ve içindeki MySQL connection pool) yalnızca BİR KEZ
-    oluşturulur ve tüm oturumlar arasında paylaşılır. @st.cache_data'nın
-    aksine @st.cache_resource, DB bağlantısı/pool gibi "paylaşılan, yeniden
-    kullanılabilir kaynaklar" içindir — her rerun'da yeniden oluşturulmaz.
-    """
-    return DashboardVeriErisim()
+
 @st.cache_data(ttl=30)
 def stok_listesi_cache(_veri):
     return _veri.stok_listesini_getir()
@@ -106,14 +100,17 @@ def arayuzu_ciz():
     # Sistem Sağlığı Paneli
     with st.expander("📊 Sistem Sağlığı ve Günlükler (Loglar)"):
         try:
-            with open("erp_sistem.log", "r") as f:
+            # NOT (madde 8): encoding='utf-8' açıkça belirtildi; logging.basicConfig
+            # artık dosyayı utf-8 ile yazıyor, burada da aynı encoding ile
+            # okunmazsa Türkçe karakterler bozuk görünebilir/hataya yol açabilir.
+            with open("erp_sistem.log", "r", encoding="utf-8") as f:
                 log_icerigi = f.read()
                 # Logları son 20 satır olarak gösterelim ki ekranı boğmasın
                 log_satirlari = log_icerigi.splitlines()
                 st.text("\n".join(log_satirlari[-20:]))
 
             if st.button("Log Dosyasını İndir"):
-                with open("erp_sistem.log", "r") as f:
+                with open("erp_sistem.log", "r", encoding="utf-8") as f:
                     st.download_button("Dosyayı Kaydet", f, file_name="erp_sistem.log")
         except FileNotFoundError:
             st.warning("Henüz hiç log kaydı bulunamadı.")
@@ -121,7 +118,7 @@ def arayuzu_ciz():
     if 'giris_yapildi' not in st.session_state:
         st.session_state.update({'giris_yapildi': False, 'rol': None, 'kullanici_adi': None, 'eposta_gonderildi': set()})
 
-    veri = veri_erisimi_al()
+    veri = DashboardVeriErisim()
 
     if not st.session_state['giris_yapildi']:
         st.title("🔒 ERP Giriş")
@@ -374,3 +371,4 @@ def arayuzu_ciz():
 
 if __name__ == "__main__":
     arayuzu_ciz()
+

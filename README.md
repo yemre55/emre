@@ -50,6 +50,24 @@ docker-compose exec mysql mysql -u root -p"${DB_ROOT_PASSWORD}" "${DB_NAME}" -e 
   "INSERT INTO Users (Username, PasswordHash, Role) VALUES ('yonetici1', '<ÜRETİLEN_HASH>', 'Yonetici');"
 ```
 
+### Türkçe karakter / charset notu
+
+Uygulama (Python tarafı: `database.py`, `tedarikci_yonetimi.py`, `stok_takip.py`,
+`veri_uret.py`, `sifre_guncelle.py`) tüm MySQL bağlantılarında `charset='utf8mb4'`
+kullanır ve loglama (`erp_sistem.log`) `encoding='utf-8'` ile yazılır. Ancak
+MySQL **CLI**'a manuel bağlandığınızda (örn. yukarıdaki komut veya
+`docker exec -it erp_mysql mysql -u root -p`) istemcinin kendi varsayılan
+charset'i farklı olabilir ve Türkçe karakterler (ç, ğ, ı, ö, ş, ü) terminalde
+bozuk (mojibake) görünebilir. Bunu önlemek için CLI'a bağlanırken de charset'i
+açıkça belirtin:
+
+```bash
+docker exec -it erp_mysql mysql -u root -p --default-character-set=utf8mb4
+```
+
+Bağlandıktan sonra oturumun charset'ini `SHOW VARIABLES LIKE 'character_set%';`
+ile doğrulayabilirsiniz; `utf8mb4` görmelisiniz.
+
 ## Docker'sız Çalıştırma (yerel geliştirme)
 
 ```bash
@@ -100,7 +118,9 @@ ruff check .
 └── .github/workflows/ci.yml
 ```
 
-
+> Not: `main.py` (CLI orkestrasyon betiği) bu pakete dahil edilmemiştir çünkü
+> bu depoda yer almayan `stok_takip.py` ve `tedarikci_yonetimi.py`
+> modüllerine bağımlıdır. Docker imajı doğrudan `dashboard.py`'yi çalıştırır.
 
 ## Ortam Değişkenleri
 
@@ -113,3 +133,4 @@ ruff check .
 | `EPOSTA_GONDEREN` / `EPOSTA_ALICI` | Kritik stok bildirim e-postası gönderen/alıcı adresleri |
 
 `.env` dosyasını **asla** git'e commit etmeyin.
+

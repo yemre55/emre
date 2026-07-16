@@ -31,7 +31,9 @@ class VeriUretici:
                 host=self.host,
                 user=self.user,
                 password=self.password,
-                database=self.database
+                database=self.database,
+                # NOT (madde 8): bkz. stok_takip.py'deki aynı not.
+                charset='utf8mb4'
             )
             self.cursor = self.db.cursor()
             print("Veritabanı bağlantısı başarılı.")
@@ -109,3 +111,4 @@ if __name__ == "__main__":
         uretici.temel_verileri_ekle()
         uretici.rastgele_satis_olustur(50)
         uretici.baglantiyi_kapat()
+
