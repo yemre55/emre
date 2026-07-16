@@ -18,8 +18,6 @@ ve builtins.input mock'lanır.
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 os.environ.setdefault("DB_HOST", "testhost")
 os.environ.setdefault("DB_NAME", "erp_stok_projesi")
 os.environ.setdefault("DB_USER", "root")
