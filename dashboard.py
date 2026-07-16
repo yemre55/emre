@@ -59,6 +59,26 @@ def onay_bekleyenler_cache(_veri):
 def log_verileri_cache(_veri):
     return _veri.log_verilerini_getir()
 
+@st.cache_resource
+def veri_erisim_nesnesi():
+    """
+    DÜZELTME: DashboardVeriErisim() önceden arayuzu_ciz() içinde her
+    Streamlit rerun'unda (her form gönderimi, her buton tıklaması, her
+    st.rerun() çağrısı) yeniden çağrılıyordu. Bu sınıfın __init__'i
+    gerçek bir MySQLConnectionPool açıyor (pool_size kadar canlı MySQL
+    bağlantısı kuruyor) ve eski pool asla kapatılmıyordu. Sonuç: kullanım
+    arttıkça MySQL'in max_connections limitine hızla yaklaşılıyor, limit
+    dolduğunda veri çeken fonksiyonlar hataya düşüyor ve bu da kullanıcıya
+    "girişten hemen sonra oturumdan atılma" gibi görünüyordu.
+
+    @st.cache_resource, @st.cache_data'nın aksine tam olarak bu tür
+    "kaynak" nesneleri (DB bağlantı havuzu, ML modeli vb.) için tasarlanmış:
+    fonksiyon yalnızca BİR KEZ çalışır, dönen nesne tüm oturumlar/rerun'lar
+    arasında paylaşılır.
+    """
+    return DashboardVeriErisim()
+
+
 @st.cache_data(ttl=60)
 def tedarikci_bilgisi_cache(urun_adi):
     """
@@ -118,7 +138,7 @@ def arayuzu_ciz():
     if 'giris_yapildi' not in st.session_state:
         st.session_state.update({'giris_yapildi': False, 'rol': None, 'kullanici_adi': None, 'eposta_gonderildi': set()})
 
-    veri = DashboardVeriErisim()
+    veri = veri_erisim_nesnesi()
 
     if not st.session_state['giris_yapildi']:
         st.title("🔒 ERP Giriş")
