@@ -25,3 +25,12 @@ TAHMIN_GUN_ESIGI = 7
 
 # Satış hızı hesaplanırken baz alınan gün sayısı (örn. son 30 günlük satışlara göre)
 SATIS_HIZI_HESAPLAMA_GUN_SAYISI = 30
+
+# --- Brute-force / Hesap Kilitleme Ayarları ---
+# Üst üste bu kadar başarısız giriş denemesinden sonra hesap geçici
+# olarak kilitlenir (kullanici_dogrula fonksiyonunda kullanılır).
+MAX_BASARISIZ_GIRIS_DENEMESI = 5
+
+# Hesap kilitlendiğinde kaç dakika boyunca giriş engellenecek.
+HESAP_KILITLEME_SURESI_DAKIKA = 15
+

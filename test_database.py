@@ -23,6 +23,7 @@ SADECE kendi iş mantığı (business logic) test edilir.
 
 import pytest
 from unittest.mock import MagicMock, patch
+from datetime import datetime, timedelta
 import pandas as pd
 
 from database import DashboardVeriErisim, Error
@@ -212,6 +213,120 @@ class TestKullaniciDogrula:
         sonuc = veri.kullanici_dogrula("yonetici", "herhangi_bir_sifre")
 
         assert sonuc == (False, None)
+
+    # --- Brute-force koruması testleri ---
+
+    def test_kilitli_hesaba_dogru_sifreyle_bile_giris_reddedilir(self, veri):
+        """DÜZELTME testi: LockedUntil ileri bir tarihteyse, şifre doğru
+        olsa bile giriş reddedilmeli ve bcrypt hiç çağrılmamalı (kilit
+        kontrolü şifre kontrolünden ÖNCE yapılmalı)."""
+        ileri_tarih = datetime.now() + timedelta(minutes=10)
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "Role": "Yonetici",
+            "PasswordHash": "sahte_hash_degeri",
+            "FailedAttempts": 5,
+            "LockedUntil": ileri_tarih,
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        with patch("database.bcrypt.checkpw") as mock_checkpw:
+            sonuc = veri.kullanici_dogrula("yonetici", "dogru_sifre")
+
+        assert sonuc == (False, None)
+        mock_checkpw.assert_not_called()
+
+    def test_kilit_suresi_gecmisse_normal_akisa_devam_eder(self, veri):
+        """LockedUntil geçmişte bir tarihse (kilit süresi dolmuşsa),
+        fonksiyon normal şifre kontrolüne devam etmeli ve doğru şifreyle
+        giriş başarılı olmalı."""
+        gecmis_tarih = datetime.now() - timedelta(minutes=1)
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "Role": "Yonetici",
+            "PasswordHash": "sahte_hash_degeri",
+            "FailedAttempts": 5,
+            "LockedUntil": gecmis_tarih,
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        with patch("database.bcrypt.checkpw", return_value=True):
+            sonuc = veri.kullanici_dogrula("yonetici", "dogru_sifre")
+
+        assert sonuc == (True, "Yonetici")
+
+    def test_esik_altinda_basarisiz_denemede_kilitlenmez(self, veri):
+        """MAX_BASARISIZ_GIRIS_DENEMESI'nin altında bir deneme sayısında
+        (örn. 2. yanlış deneme) hesap kilitlenmemeli, sadece sayaç
+        UPDATE ile artırılmalı."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "Role": "Yonetici",
+            "PasswordHash": "sahte_hash_degeri",
+            "FailedAttempts": 1,
+            "LockedUntil": None,
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        with patch("database.bcrypt.checkpw", return_value=False):
+            sonuc = veri.kullanici_dogrula("yonetici", "yanlis_sifre")
+
+        assert sonuc == (False, None)
+        update_cagrisi = fake_cursor.execute.call_args_list[-1]
+        assert "FailedAttempts = %s WHERE Username" in update_cagrisi.args[0]
+        assert update_cagrisi.args[1] == (2, "yonetici")
+        assert "LockedUntil" not in update_cagrisi.args[0]
+
+    def test_esige_ulasinca_hesap_kilitlenir(self, veri):
+        """FailedAttempts, MAX_BASARISIZ_GIRIS_DENEMESI eşiğine (5)
+        ulaştığında UPDATE sorgusu artık LockedUntil'i de ayarlamalı."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "Role": "Yonetici",
+            "PasswordHash": "sahte_hash_degeri",
+            "FailedAttempts": 4,  # bu deneme 5. olacak -> kilitlenmeli
+            "LockedUntil": None,
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        with patch("database.bcrypt.checkpw", return_value=False):
+            sonuc = veri.kullanici_dogrula("yonetici", "yanlis_sifre")
+
+        assert sonuc == (False, None)
+        update_cagrisi = fake_cursor.execute.call_args_list[-1]
+        assert "LockedUntil = NOW() + INTERVAL %s MINUTE" in update_cagrisi.args[0]
+        assert update_cagrisi.args[1] == (5, 15, "yonetici")
+
+    def test_basarili_giriste_sayac_sifirlanir_ve_kilit_kalkar(self, veri):
+        """Doğru şifreyle giriş yapıldığında, önceki başarısız denemeler
+        olsa bile FailedAttempts=0 ve LockedUntil=NULL olacak şekilde bir
+        UPDATE çalıştırılmalı (bir sonraki girişte eski sayaç kalmamalı)."""
+        fake_cursor = MagicMock()
+        fake_cursor.fetchone.return_value = {
+            "Role": "Depo_Calisani",
+            "PasswordHash": "sahte_hash_degeri",
+            "FailedAttempts": 3,
+            "LockedUntil": None,
+        }
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        veri.baglanti_getir = MagicMock(return_value=fake_conn)
+
+        with patch("database.bcrypt.checkpw", return_value=True):
+            sonuc = veri.kullanici_dogrula("depocu", "dogru_sifre")
+
+        assert sonuc == (True, "Depo_Calisani")
+        update_cagrisi = fake_cursor.execute.call_args_list[-1]
+        assert "FailedAttempts = 0, LockedUntil = NULL" in update_cagrisi.args[0]
+        fake_conn.commit.assert_called_once()
 
 
 # ----------------------------------------------------------------------

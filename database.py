@@ -1,11 +1,14 @@
 import os
 import logging
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import bcrypt
 from typing import Optional, Tuple
 from dotenv import load_dotenv
 from mysql.connector import pooling, Error
+
+from config import MAX_BASARISIZ_GIRIS_DENEMESI, HESAP_KILITLEME_SURESI_DAKIKA
 
 # .env dosyasını yüklüyoruz
 load_dotenv()
@@ -40,22 +43,79 @@ class DashboardVeriErisim:
         return self.db_pool.get_connection()
 
     def kullanici_dogrula(self, username, password) -> Tuple[bool, Optional[str]]:
+        """
+        NOT: Brute-force koruması eklendi. Önceden şifre yanlış girildikçe
+        sınırsız deneme yapılabiliyordu. Artık:
+          - Üst üste MAX_BASARISIZ_GIRIS_DENEMESI (varsayılan 5) hatalı
+            denemeden sonra hesap HESAP_KILITLEME_SURESI_DAKIKA (varsayılan
+            15) dakika boyunca kilitlenir; bu sürede şifre doğru olsa bile
+            giriş reddedilir.
+          - Doğru şifre girildiğinde sayaç sıfırlanır ve kilit kaldırılır.
+          - Kullanıcı adı yanlışsa (mevcut olmayan kullanıcı) sayaç/kilit
+            mantığı devreye girmez; zaten (False, None) döner.
+        """
         db = None
         try:
             db = self.baglanti_getir()
             cursor = db.cursor(dictionary=True, buffered=True)
-            cursor.execute("SELECT Role, PasswordHash FROM Users WHERE Username = %s", (username,))
+            cursor.execute(
+                "SELECT Role, PasswordHash, FailedAttempts, LockedUntil FROM Users WHERE Username = %s",
+                (username,),
+            )
             kullanici = cursor.fetchone()
 
-            if kullanici:
-                db_hash = kullanici['PasswordHash'].encode('utf-8')
-                girilen_sifre = password.encode('utf-8')
+            if not kullanici:
+                logging.warning(f"Başarısız giriş denemesi (kullanıcı bulunamadı): {username}")
+                return False, None
 
-                if bcrypt.checkpw(girilen_sifre, db_hash):
-                    logging.info(f"Kullanıcı giriş yaptı: {username}")
-                    return True, kullanici['Role']
+            # --- Hesap kilitli mi? ---
+            kilit_bitisi = kullanici.get("LockedUntil")
+            if kilit_bitisi is not None and kilit_bitisi > datetime.now():
+                logging.warning(
+                    f"Kilitli hesaba giriş denemesi: {username} "
+                    f"(kilit bitişi: {kilit_bitisi})"
+                )
+                return False, None
 
-            logging.warning(f"Başarısız giriş denemesi: {username}")
+            db_hash = kullanici["PasswordHash"].encode("utf-8")
+            girilen_sifre = password.encode("utf-8")
+
+            if bcrypt.checkpw(girilen_sifre, db_hash):
+                # Başarılı giriş: sayaç sıfırlanır, kilit kaldırılır.
+                cursor.execute(
+                    "UPDATE Users SET FailedAttempts = 0, LockedUntil = NULL WHERE Username = %s",
+                    (username,),
+                )
+                db.commit()
+                logging.info(f"Kullanıcı giriş yaptı: {username}")
+                return True, kullanici["Role"]
+
+            # --- Şifre yanlış: deneme sayacını artır ---
+            yeni_deneme_sayisi = (kullanici.get("FailedAttempts") or 0) + 1
+
+            if yeni_deneme_sayisi >= MAX_BASARISIZ_GIRIS_DENEMESI:
+                cursor.execute(
+                    """UPDATE Users
+                       SET FailedAttempts = %s,
+                           LockedUntil = NOW() + INTERVAL %s MINUTE
+                       WHERE Username = %s""",
+                    (yeni_deneme_sayisi, HESAP_KILITLEME_SURESI_DAKIKA, username),
+                )
+                logging.warning(
+                    f"Hesap kilitlendi: {username} ({yeni_deneme_sayisi} başarısız "
+                    f"deneme, {HESAP_KILITLEME_SURESI_DAKIKA} dakika kilitli)"
+                )
+            else:
+                cursor.execute(
+                    "UPDATE Users SET FailedAttempts = %s WHERE Username = %s",
+                    (yeni_deneme_sayisi, username),
+                )
+                logging.warning(
+                    f"Başarısız giriş denemesi: {username} "
+                    f"({yeni_deneme_sayisi}/{MAX_BASARISIZ_GIRIS_DENEMESI})"
+                )
+
+            db.commit()
             return False, None
 
         except Error as e:

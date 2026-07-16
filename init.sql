@@ -14,10 +14,15 @@
 -- ==========================================================
 
 CREATE TABLE IF NOT EXISTS Users (
-    UserID        INT AUTO_INCREMENT PRIMARY KEY,
-    Username      VARCHAR(100) NOT NULL UNIQUE,
-    PasswordHash  VARCHAR(255) NOT NULL,
-    Role          ENUM('Yonetici', 'Depo_Calisani') NOT NULL
+    UserID          INT AUTO_INCREMENT PRIMARY KEY,
+    Username        VARCHAR(100) NOT NULL UNIQUE,
+    PasswordHash    VARCHAR(255) NOT NULL,
+    Role            ENUM('Yonetici', 'Depo_Calisani') NOT NULL,
+    -- Brute-force koruması (kullanici_dogrula fonksiyonu tarafından
+    -- yönetilir): üst üste başarısız deneme sayısı ve, eşik aşılırsa,
+    -- hesabın ne zamana kadar kilitli kalacağı.
+    FailedAttempts  INT NOT NULL DEFAULT 0,
+    LockedUntil     DATETIME NULL
 );
 
 CREATE TABLE IF NOT EXISTS Suppliers (
@@ -102,6 +107,15 @@ ON DUPLICATE KEY UPDATE ProductName = ProductName;
 --   ALTER TABLE Products ADD COLUMN SupplierID INT NULL,
 --       ADD FOREIGN KEY (SupplierID) REFERENCES Suppliers(SupplierID);
 --
+-- Aynı şekilde, brute-force koruması (FailedAttempts/LockedUntil) daha
+-- sonra eklendiği için mevcut bir Users tablonuz varsa bunu da elle
+-- eklemeniz gerekir:
+--
+--   ALTER TABLE Users
+--       ADD COLUMN FailedAttempts INT NOT NULL DEFAULT 0,
+--       ADD COLUMN LockedUntil DATETIME NULL;
+--
 -- Alternatif: geliştirme ortamında veriyi kaybetmeyi göze alıyorsanız
 -- "docker-compose down -v" ile volume'u silip yeniden "up" yapmak da
 -- bu dosyayı sıfırdan çalıştırır.
+
