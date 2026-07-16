@@ -68,6 +68,31 @@ docker exec -it erp_mysql mysql -u root -p --default-character-set=utf8mb4
 Bağlandıktan sonra oturumun charset'ini `SHOW VARIABLES LIKE 'character_set%';`
 ile doğrulayabilirsiniz; `utf8mb4` görmelisiniz.
 
+## Güvenlik
+
+### Brute-force koruması
+
+`Users` tablosuna `FailedAttempts` ve `LockedUntil` kolonları eklendi.
+Üst üste `MAX_BASARISIZ_GIRIS_DENEMESI` (varsayılan: 5, `config.py`) kadar
+başarısız giriş denemesinden sonra hesap `HESAP_KILITLEME_SURESI_DAKIKA`
+(varsayılan: 15 dakika, `config.py`) boyunca otomatik olarak kilitlenir.
+Bu mantık `kullanici_dogrula` fonksiyonunda uygulanır; eşikleri değiştirmek
+için kod içinde arama yapmanıza gerek yok, `config.py`'deki bu iki değeri
+güncellemeniz yeterlidir.
+
+### `sifre_guncelle.py` ile şifre sıfırlama
+
+Bir kullanıcının şifresini komut satırından sıfırlamak için:
+
+```bash
+python3 sifre_guncelle.py
+```
+
+Yanlışlıkla üretim veritabanında çalıştırmayı önlemek için betik artık
+işlem yapmadan önce **hedef veritabanının adını elle yazarak onaylamanızı**
+ister (`.env`'deki `DB_NAME` ile eşleşmelidir). Onay adımı atlanamaz;
+girilen ad `DB_NAME` ile eşleşmiyorsa betik işlemi iptal eder.
+
 ## Docker'sız Çalıştırma (yerel geliştirme)
 
 ```bash
@@ -87,7 +112,12 @@ pytest -v
 ```
 
 `test_database.py`, gerçek bir MySQL bağlantısına ihtiyaç duymadan
-(mock'lanmış) veri katmanının iş mantığını test eder.
+(mock'lanmış) veri katmanının iş mantığını test eder; `stok_guncelle`,
+`stok_listesini_getir`, `satis_verilerini_getir`, `log_verilerini_getir`
+ve `tedarikci_bilgisi_getir` fonksiyonları için mock testler içerir.
+
+`test_sifre_guncelle.py`, `sifre_guncelle.py`'deki veritabanı adı onay
+adımını test eder.
 
 ## Lint
 
@@ -105,22 +135,32 @@ ruff check .
 
 ```
 .
-├── dashboard.py          # Streamlit UI katmanı
-├── database.py           # Veri erişim katmanı (DashboardVeriErisim sınıfı)
-├── services.py           # İş mantığı / e-posta bildirim servisi
-├── config.py             # Merkezi eşik değerleri (KRITIK_STOK_ESIGI vb.)
-├── test_database.py      # pytest birim testleri
+├── dashboard.py            # Streamlit UI katmanı
+├── database.py             # Veri erişim katmanı (DashboardVeriErisim sınıfı)
+├── services.py             # İş mantığı / e-posta bildirim servisi
+├── config.py               # Merkezi eşik değerleri (KRITIK_STOK_ESIGI vb.)
+├── stok_takip.py           # Stok takip / kritik seviye mantığı
+├── tedarikci_yonetimi.py   # Tedarikçi/teslimat bilgisi (Docker imajına dahildir)
+├── sifre_guncelle.py       # CLI ile şifre sıfırlama (onay adımlı)
+├── veri_uret.py            # Örnek/test verisi üretme betiği
+├── yapiyi_goster.py        # Veritabanı şema/yapı görüntüleme betiği
+├── main.py                 # CLI orkestrasyon betiği
+├── test_database.py        # pytest birim testleri (veri katmanı)
+├── test_sifre_guncelle.py  # pytest birim testleri (şifre sıfırlama onayı)
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
-├── init.sql              # MySQL şeması (docker-compose ile otomatik yüklenir)
+├── init.sql                # MySQL şeması (docker-compose ile otomatik yüklenir)
+├── ruff.toml                # Lint kuralları
 ├── .env.example
 └── .github/workflows/ci.yml
 ```
 
-> Not: `main.py` (CLI orkestrasyon betiği) bu pakete dahil edilmemiştir çünkü
-> bu depoda yer almayan `stok_takip.py` ve `tedarikci_yonetimi.py`
-> modüllerine bağımlıdır. Docker imajı doğrudan `dashboard.py`'yi çalıştırır.
+> Not: Docker imajı yalnızca `dashboard.py`, `database.py`, `services.py`,
+> `config.py` ve `tedarikci_yonetimi.py` dosyalarını içerir (bkz. `Dockerfile`).
+> `main.py`, `stok_takip.py`, `sifre_guncelle.py`, `veri_uret.py` ve
+> `yapiyi_goster.py` yerel/CLI kullanım için tasarlanmıştır ve imaja dahil
+> edilmemiştir.
 
 ## Ortam Değişkenleri
 
@@ -131,6 +171,7 @@ ruff check .
 | `DB_ROOT_PASSWORD` | Yalnızca docker-compose ilk kurulumunda kullanılır |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | Brevo SMTP bilgileri |
 | `EPOSTA_GONDEREN` / `EPOSTA_ALICI` | Kritik stok bildirim e-postası gönderen/alıcı adresleri |
+| `DB_POOL_SIZE` | MySQL bağlantı havuzu boyutu (varsayılan: 8). Önceden 32'ydi; yük altında gereksiz bağlantı tüketimini azaltmak için düşürüldü ve `.env`'den ayarlanabilir hale getirildi. |
 
 `.env` dosyasını **asla** git'e commit etmeyin.
 
